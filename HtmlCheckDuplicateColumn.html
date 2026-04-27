@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; padding: 15px; font-size: 13px; }
+    select, button { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 4px; border: 1px solid #ccc; }
+    button { background: #4CAF50; color: white; border: none; font-weight: bold; cursor: pointer; }
+    #res { margin-top: 10px; border-top: 1px solid #eee; }
+    .dup-item { padding: 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; color: #1a73e8; }
+    .dup-item:hover { background: #f1f1f1; }
+    .help-link { margin-top: 20px; text-align: center; border-top: 1px dashed #ccc; padding-top: 10px; }
+    .help-link a { color: #1a73e8; text-decoration: none; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <strong>KIỂM TRA TRÙNG LẶP</strong>
+  <p id="sheetDisplay" style="font-style:italic; color:gray;"></p>
+  <label>Chọn cột cần quét:</label>
+  <select id="colSelect"></select>
+  <button onclick="runCheck()">TÌM TRÙNG LẶP</button>
+  <div id="res"></div>
+  <div class="help-link">
+    <a href="https://endurable-apricot-881-tnn.notion.site/T-nh-n-ng-Ki-m-tra-tr-ng-l-p-_Duplicate-checker-3436e569d7d180ac871bc527cbadc394?source=copy_link" target="_blank">📖 Hướng dẫn sử dụng</a>
+  </div>
+  <script>
+    window.onload = () => {
+      google.script.run.withSuccessHandler(name => {
+        document.getElementById('sheetDisplay').innerText = "Đang quét trên: " + name;
+      }).getActiveSheetName();
+      
+      google.script.run.withSuccessHandler(headers => {
+        const s = document.getElementById('colSelect');
+        headers.forEach(h => s.add(new Option(h, h)));
+      }).getColumnHeaders();
+    };
+
+    function runCheck() {
+      const col = document.getElementById('colSelect').value;
+      const resDiv = document.getElementById('res');
+      resDiv.innerHTML = "Đang quét...";
+      google.script.run.withSuccessHandler(data => {
+        resDiv.innerHTML = data.length ? "" : "Chúc mừng! Không có trùng lặp.";
+        data.forEach(item => {
+          const d = document.createElement("div"); d.className = "dup-item";
+          d.innerText = item.value + " (Xuất hiện " + item.count + " lần)";
+          d.onclick = () => google.script.run.applyFilter(col, item.value);
+          resDiv.appendChild(d);
+        });
+      }).findDuplicateValues(col);
+    }
+  </script>
+</body>
+</html>
