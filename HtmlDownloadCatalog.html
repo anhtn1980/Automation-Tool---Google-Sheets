@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; padding: 15px; font-size: 13px; }
+    select, button { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 4px; border: 1px solid #ccc; }
+    button { background: #1a73e8; color: white; border: none; font-weight: bold; cursor: pointer; }
+    button:disabled { background: #ccc; }
+    .progress-bar-bg { width: 100%; background: #eee; height: 10px; border-radius: 5px; overflow: hidden; margin-top:10px;}
+    .progress-bar-fill { width: 0%; background: #28a745; height: 100%; transition: 0.3s; }
+    #log { max-height: 200px; overflow-y: auto; border: 1px solid #eee; margin-top: 10px; font-size: 11px; padding: 5px; background: #fafafa; }
+    .folder-link-box { display: none; margin-top: 15px; padding: 10px; background: #e8f0fe; text-align: center; border: 1px solid #1a73e8; }
+    .help-link { margin-top: 20px; text-align: center; border-top: 1px dashed #ccc; padding-top: 10px; }
+    .help-link a { color: #1a73e8; text-decoration: none; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <strong>TẢI CATALOG THÔNG MINH</strong>
+  <label>Sheet:</label><select id="sheetName"></select>
+  <label>Cột SKU:</label><select id="colSKU"></select>
+  <label>Cột Link:</label><select id="colLink"></select>
+  <label>
+  <input type="checkbox" id="chkRowPrefix" checked>
+  Thêm Row index vào tên file
+  </label>
+  <button id="btnRun" onclick="start()">BẮT ĐẦU TẢI</button>
+  <button id="btnCancel" onclick="cancelTask()" style="background:#dc3545">HỦY</button>
+  <div id="prog" style="display:none">
+    <div class="progress-bar-bg"><div id="bar" class="progress-bar-fill"></div></div>
+    <p id="stat" style="font-weight:bold"></p>
+    <div id="folderLinkBox" class="folder-link-box">
+      <a id="fUrl" href="#" target="_blank">📂 MỞ THƯ MỤC DRIVE</a>
+    </div>
+    <div id="log"></div>
+  </div>
+  <div class="help-link">
+    <a href="https://endurable-apricot-881-tnn.notion.site/C-ng-c-t-i-Catalog-th-ng-minh-3436e569d7d1800993c9f3debc7de684?source=copy_link" target="_blank">📖 Hướng dẫn sử dụng</a>
+  </div>
+  <script>
+    let isCancelled = false;
+    function cancelTask() {
+      isCancelled = true;
+      document.getElementById('stat').innerText = "ĐÃ HỦY";
+      document.getElementById('btnRun').disabled = false;
+    }
+    let fUrlGlobal = "";
+    window.onload = () => google.script.run.withSuccessHandler(d => {
+      const s = document.getElementById('sheetName');
+      d.sheets.forEach(n => s.add(new Option(n, n, n === d.activeSheetName)));
+      const s1 = document.getElementById('colSKU'), s2 = document.getElementById('colLink');
+      d.headers.forEach(h => { s1.add(new Option(h, h)); s2.add(new Option(h, h)); });
+    }).getSheetAndColumns();
+
+    function start() {
+      isCancelled = false;
+      const conf = { 
+        sheetName: document.getElementById('sheetName').value,
+        colSKU: document.getElementById('colSKU').value,
+        colLink: document.getElementById('colLink').value,
+        useRowPrefix: document.getElementById('chkRowPrefix').checked
+      };
+      document.getElementById('btnRun').disabled = true;
+      document.getElementById('prog').style.display = 'block';
+      document.getElementById('folderLinkBox').style.display = 'none';
+      document.getElementById('log').innerHTML = "";
+      google.script.run.withSuccessHandler(res => { fUrlGlobal = res.folderUrl; doTask(res.tasks, res.folderId, 0); }).prepareDownload(conf);
+    }
+
+    const BATCH_SIZE = 5;
+
+function doTask(ts, fid, idx) {
+  if (isCancelled) return;
+
+  if (idx >= ts.length) {
+    document.getElementById('stat').innerText = "HOÀN TẤT!";
+    document.getElementById('folderLinkBox').style.display = 'block';
+    document.getElementById('fUrl').href = fUrlGlobal;
+    document.getElementById('btnRun').disabled = false;
+    return;
+  }
+
+  const batch = ts.slice(idx, idx + BATCH_SIZE);
+
+  document.getElementById('stat').innerText =
+    "Đang tải: " + (idx + 1) + " → " + (idx + batch.length) + "/" + ts.length;
+
+  google.script.run.withSuccessHandler(results => {
+
+    results.forEach((r, i) => {
+      const d = document.createElement("div");
+      d.style.color = r.status === "Thành công" ? "green" : "red";
+      d.innerText = "Dòng " + r.rowIndex + ": " + r.status;
+      document.getElementById('log').prepend(d);
+    });
+
+    const nextIdx = idx + BATCH_SIZE;
+    document.getElementById('bar').style.width =
+      Math.round((nextIdx / ts.length) * 100) + "%";
+
+    doTask(ts, fid, nextIdx);
+
+  }).downloadBatch(batch, fid);
+}
+  </script>
+</body>
+</html>
+
+
+
+
