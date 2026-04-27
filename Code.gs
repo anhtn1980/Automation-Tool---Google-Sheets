@@ -73,6 +73,18 @@ function getSheetAndColumns() {
   };
 }
 
+// Hàm mới: Lấy headers của một sheet cụ thể
+function getHeadersBySheetName(sheetName) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return [];
+    return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  } catch (e) {
+    return [];
+  }
+}
+
 function prepareDownload(config) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(config.sheetName);
@@ -89,7 +101,8 @@ function prepareDownload(config) {
         rowIndex: i + 1, 
         sku: data[i][colSKUIndex] || "NoSKU", 
         url: data[i][colLinkIndex],
-        useRowPrefix: config.useRowPrefix
+        useRowPrefix: config.useRowPrefix,
+        useDatasheetPrefix: config.useDatasheetPrefix
       });
     }
   }
@@ -102,40 +115,43 @@ function downloadSingleFile(task, folderId) {
     if (!url.startsWith("http")) return { status: "Lỗi: Không phải Link" };
     if (url.includes("dropbox.com")) {
       url = url.includes("dl=0") ? url.replace("dl=0", "dl=1") : url + (url.includes("?") ? "&" : "?") + "dl=1";
-    } else if (url.includes("://google.com")) {
+    } else if (url.includes("drive.google.com")) {
       const fileId = url.match(/\/d\/(.+?)\//) || url.match(/id=(.+?)(&|$)/);
-      if (fileId) url = "https://://google.com/uc?export=download&id=" + fileId[1];
+      if (fileId) url = "https://drive.google.com/uc?export=download&id=" + fileId[1];
     }
     const response = UrlFetchApp.fetch(url, {followRedirects: true, muteHttpExceptions: true});
     if (response.getResponseCode() == 200) {
-const blob = response.getBlob();
-const contentType = blob.getContentType();
+      const blob = response.getBlob();
+      const contentType = blob.getContentType();
 
-// chặn HTML (link lỗi / private)
-if (contentType.includes("html")) {
-  return { status: "Lỗi: File riêng tư/HTML" };
-}
+      // chặn HTML (link lỗi / private)
+      if (contentType.includes("html")) {
+        return { status: "Lỗi: File riêu tư/HTML" };
+      }
 
-// xác định extension
-let ext = "";
-if (contentType.includes("pdf")) ext = ".pdf";
-else if (contentType.includes("jpeg")) ext = ".jpg";
-else if (contentType.includes("jpg")) ext = ".jpg";
-else if (contentType.includes("png")) ext = ".png";
-else if (contentType.includes("gif")) ext = ".gif";
+      // xác định extension
+      let ext = "";
+      if (contentType.includes("pdf")) ext = ".pdf";
+      else if (contentType.includes("jpeg")) ext = ".jpg";
+      else if (contentType.includes("jpg")) ext = ".jpg";
+      else if (contentType.includes("png")) ext = ".png";
+      else if (contentType.includes("gif")) ext = ".gif";
 
-// làm sạch tên SKU
-const safeSKU = (task.sku || "NoSKU").toString().replace(/[\\/:*?"<>|]/g, "_");
+      // làm sạch tên SKU
+      const safeSKU = (task.sku || "NoSKU").toString().replace(/[\\/:*?"<>|]/g, "_");
 
-// prefix row (sẽ dùng ở phần 2)
-let prefix = task.useRowPrefix ? ("Row" + task.rowIndex + "_") : "";
+      // xây dựng prefix
+      let prefix = "";
+      if (task.useRowPrefix) prefix += "Row" + task.rowIndex + "_";
+      if (task.useDatasheetPrefix) prefix += "Datasheet_";
 
-// đặt tên file
-blob.setName(prefix + safeSKU + ext);
+      // đặt tên file
+      blob.setName(prefix + safeSKU + ext);
 
-DriveApp.getFolderById(folderId).createFile(blob);
+      DriveApp.getFolderById(folderId).createFile(blob);
 
-return { status: "Thành công" };   }
+      return { status: "Thành công" };
+    }
     return { status: "Lỗi HTTP " + response.getResponseCode() };
   } catch (e) { return { status: "Lỗi: " + e.message }; }
 }
