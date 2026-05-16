@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; padding: 14px; margin: 0; font-size: 13px; }
+    .card { background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; padding: 12px; }
+    .title { color: #1a73e8; font-weight: 700; margin-bottom: 10px; font-size: 14px; }
+    label { display: block; margin: 8px 0 4px; font-weight: 600; }
+    select, button { width: 100%; padding: 10px; border-radius: 4px; font-size: 13px; }
+    select { border: 1px solid #cfcfcf; }
+    button { border: none; font-weight: 700; cursor: pointer; margin-top: 12px; }
+    .btn-run { background: #1a73e8; color: #fff; }
+    .btn-run:hover { background: #155cc4; }
+    .btn-run:disabled { background: #b0bec5; cursor: not-allowed; }
+    #status { margin-top: 12px; padding: 10px; border-radius: 4px; font-size: 12px; white-space: pre-line; }
+    .ok { background: #e8f5e9; color: #2e7d32; border-left: 4px solid #2e7d32; }
+    .err { background: #ffebee; color: #c62828; border-left: 4px solid #c62828; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">Chuẩn hóa - xóa bản ghi nhóm</div>
+
+    <label>Sheet cần xử lý</label>
+    <select id="sheetSelect"><option value="">-- Chọn Sheet --</option></select>
+
+    <label>Cột chứa tên Nhóm</label>
+    <select id="groupColSelect"><option value="">-- Chọn cột --</option></select>
+
+    <label>Cột để Fill tên nhóm</label>
+    <select id="fillColSelect"><option value="">-- Chọn cột --</option></select>
+
+    <button id="btnRun" class="btn-run" onclick="runNormalize()">Copy tên nhóm vào bản ghi</button>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    window.onload = () => {
+      google.script.run.withSuccessHandler(data => {
+        const sel = document.getElementById('sheetSelect');
+        data.sheets.forEach(name => sel.add(new Option(name, name, name === data.activeSheetName, name === data.activeSheetName)));
+        if (data.activeSheetName) loadColumns(data.activeSheetName);
+      }).getSheetAndColumns();
+
+      document.getElementById('sheetSelect').addEventListener('change', e => loadColumns(e.target.value));
+    };
+
+    function loadColumns(sheetName) {
+      if (!sheetName) return;
+      google.script.run.withSuccessHandler(headers => {
+        const groupCol = document.getElementById('groupColSelect');
+        const fillCol = document.getElementById('fillColSelect');
+        groupCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+        fillCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+
+        headers.forEach(h => {
+          groupCol.add(new Option(h, h));
+          fillCol.add(new Option(h, h));
+        });
+
+        const groupDefault = headers.find(h => (h || '').toString().trim().toLowerCase() === 'sku');
+        const fillDefault = headers.find(h => (h || '').toString().trim().toLowerCase() === 'class');
+        if (groupDefault) groupCol.value = groupDefault;
+        if (fillDefault) fillCol.value = fillDefault;
+      }).getHeadersBySheetName(sheetName);
+    }
+
+    function runNormalize() {
+      const config = {
+        sheetName: document.getElementById('sheetSelect').value,
+        groupColName: document.getElementById('groupColSelect').value,
+        fillColName: document.getElementById('fillColSelect').value
+      };
+
+      if (!config.sheetName) return setStatus('Vui lòng chọn Sheet.', 'err');
+      if (!config.groupColName) return setStatus('Vui lòng chọn cột chứa tên Nhóm.', 'err');
+      if (!config.fillColName) return setStatus('Vui lòng chọn cột Fill tên nhóm.', 'err');
+
+      const btn = document.getElementById('btnRun');
+      btn.disabled = true;
+      setStatus('Đang xử lý...', 'ok');
+
+      google.script.run
+        .withSuccessHandler(result => {
+          btn.disabled = false;
+          if (!result.success) return setStatus('✗ Lỗi: ' + result.error, 'err');
+          setStatus(
+            '✓ ' + result.message + '\n' +
+            '- Dòng được fill nhóm: ' + result.updatedCount + '\n' +
+            '- Dòng nhóm đã xóa: ' + result.deletedGroupRows,
+            'ok'
+          );
+        })
+        .withFailureHandler(error => {
+          btn.disabled = false;
+          setStatus('✗ Lỗi hệ thống: ' + error, 'err');
+        })
+        .normalizeGroupRowsByConfig(config);
+    }
+
+    function setStatus(msg, type) {
+      const box = document.getElementById('status');
+      box.className = type;
+      box.textContent = msg;
+    }
+  </script>
+</body>
+</html>
