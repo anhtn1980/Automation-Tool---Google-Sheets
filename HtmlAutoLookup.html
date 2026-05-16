@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; padding: 15px; font-size: 13px; margin: 0; }
+    .step { display: none; padding: 15px; background: #f9f9f9; border-radius: 4px; margin-bottom: 15px; }
+    .step.active { display: block; }
+    .step-header { font-weight: bold; font-size: 14px; margin-bottom: 12px; color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }
+    select { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 4px; border: 1px solid #ccc; }
+    button { width: 100%; padding: 11px; margin-bottom: 10px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer; font-size: 13px; }
+    .btn-next, .btn-update { background: #1a73e8; color: white; }
+    .btn-next:hover, .btn-update:hover { background: #155cc4; }
+    .btn-back { background: #757575; color: white; margin-top: 10px; }
+    .btn-back:hover { background: #616161; }
+    .btn-update:disabled { background: #ccc; cursor: not-allowed; }
+    .step-indicator { text-align: center; margin-bottom: 15px; font-size: 12px; color: #666; font-weight: bold; }
+    .step-number { display: inline-block; width: 30px; height: 30px; background: #e0e0e0; border-radius: 50%; line-height: 30px; margin: 0 5px; }
+    .step-number.active { background: #1a73e8; color: white; }
+    .step-number.completed { background: #4caf50; color: white; }
+    .help-text { font-size: 12px; color: #666; font-style: italic; margin-top: 8px; line-height: 1.4; }
+    #status { margin-top: 15px; padding: 10px; border-radius: 4px; font-size: 12px; }
+    .status-success { background: #c8e6c9; color: #2e7d32; border-left: 4px solid #2e7d32; }
+    .status-error { background: #ffcdd2; color: #c62828; border-left: 4px solid #c62828; }
+    .progress-bar-bg { width: 100%; background: #eee; height: 8px; border-radius: 4px; overflow: hidden; margin: 15px 0; }
+    .progress-bar-fill { width: 0%; background: #4caf50; height: 100%; transition: 0.3s; }
+  </style>
+</head>
+<body>
+  <div class="step-indicator">
+    <span class="step-number active" id="ind1">1</span>
+    <span class="step-number" id="ind2">2</span>
+  </div>
+
+  <div class="step active" id="step1">
+    <div class="step-header">📋 Bước 1: Chọn Sheet Nguồn</div>
+
+    <label><strong>Sheet Nguồn:</strong></label>
+    <select id="sourceSheet"><option value="">-- Chọn Sheet --</option></select>
+    <div class="help-text">Sheet chứa dữ liệu cần copy.</div>
+
+    <label><strong>Cột SKU (tham chiếu):</strong></label>
+    <select id="sourceSKUCol"><option value="">-- Chọn cột --</option></select>
+
+    <label><strong>Cột dữ liệu cần copy:</strong></label>
+    <select id="sourceDataCol"><option value="">-- Chọn cột --</option></select>
+
+    <button class="btn-next" onclick="goToStep(2)">Tiếp theo →</button>
+  </div>
+
+  <div class="step" id="step2">
+    <div class="step-header">🎯 Bước 2: Chọn Sheet Đích</div>
+
+    <label><strong>Sheet Đích:</strong></label>
+    <select id="targetSheet"><option value="">-- Chọn Sheet --</option></select>
+
+    <label><strong>Cột SKU (tham chiếu):</strong></label>
+    <select id="targetSKUCol"><option value="">-- Chọn cột --</option></select>
+
+    <label><strong>Cột đích để dán dữ liệu:</strong></label>
+    <select id="targetDataCol"><option value="">-- Chọn cột --</option></select>
+
+    <div id="summaryBox" style="background: white; padding: 12px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 15px; font-size: 12px; line-height: 1.6;">
+      <strong>Tóm tắt cấu hình:</strong><br>
+      Nguồn: <span id="sumSource">--</span><br>
+      Đích: <span id="sumTarget">--</span>
+    </div>
+
+    <button class="btn-update" id="btnUpdate" onclick="executeCopyBySku()">✓ COPY DỮ LIỆU</button>
+
+    <div id="progressBox" style="display: none; margin-top: 15px;">
+      <div class="progress-bar-bg"><div id="progressBar" class="progress-bar-fill"></div></div>
+      <p id="progressText" style="text-align: center; font-size: 12px; margin: 10px 0;">Đang xử lý...</p>
+    </div>
+
+    <div id="status"></div>
+
+    <button class="btn-back" onclick="goToStep(1)">← Quay lại</button>
+  </div>
+
+  <script>
+    let config = {
+      sourceSheet: '',
+      sourceSKUCol: '',
+      sourceDataCol: '',
+      targetSheet: '',
+      targetSKUCol: '',
+      targetDataCol: ''
+    };
+
+    window.onload = () => {
+      google.script.run.withSuccessHandler(data => {
+        const sheets = data.sheets;
+        const sourceSelect = document.getElementById('sourceSheet');
+        const targetSelect = document.getElementById('targetSheet');
+        sheets.forEach(name => {
+          sourceSelect.add(new Option(name, name));
+          targetSelect.add(new Option(name, name, name === data.activeSheetName));
+        });
+      }).getSheetAndColumns();
+
+      document.getElementById('sourceSheet').addEventListener('change', loadSourceColumns);
+      document.getElementById('targetSheet').addEventListener('change', loadTargetColumns);
+    };
+
+    function loadSourceColumns() {
+      const sheet = document.getElementById('sourceSheet').value;
+      if (!sheet) return;
+      google.script.run.withSuccessHandler(headers => {
+        const skuCol = document.getElementById('sourceSKUCol');
+        const dataCol = document.getElementById('sourceDataCol');
+        skuCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+        dataCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+        headers.forEach(h => { skuCol.add(new Option(h, h)); dataCol.add(new Option(h, h)); });
+      }).getHeadersBySheetName(sheet);
+    }
+
+    function loadTargetColumns() {
+      const sheet = document.getElementById('targetSheet').value;
+      if (!sheet) return;
+      google.script.run.withSuccessHandler(headers => {
+        const skuCol = document.getElementById('targetSKUCol');
+        const dataCol = document.getElementById('targetDataCol');
+        skuCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+        dataCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+        headers.forEach(h => { skuCol.add(new Option(h, h)); dataCol.add(new Option(h, h)); });
+      }).getHeadersBySheetName(sheet);
+    }
+
+    function goToStep(stepNum) {
+      if (stepNum === 2 && !validateStep1()) return;
+      saveConfig();
+      document.getElementById('step1').classList.toggle('active', stepNum === 1);
+      document.getElementById('step2').classList.toggle('active', stepNum === 2);
+      document.getElementById('ind1').classList.toggle('active', stepNum === 1);
+      document.getElementById('ind2').classList.toggle('active', stepNum === 2);
+      document.getElementById('ind1').classList.toggle('completed', stepNum === 2);
+      if (stepNum === 2) updateSummary();
+    }
+
+    function saveConfig() {
+      config.sourceSheet = document.getElementById('sourceSheet').value;
+      config.sourceSKUCol = document.getElementById('sourceSKUCol').value;
+      config.sourceDataCol = document.getElementById('sourceDataCol').value;
+      config.targetSheet = document.getElementById('targetSheet').value;
+      config.targetSKUCol = document.getElementById('targetSKUCol').value;
+      config.targetDataCol = document.getElementById('targetDataCol').value;
+    }
+
+    function validateStep1() {
+      if (!document.getElementById('sourceSheet').value) return showError('Vui lòng chọn Sheet Nguồn');
+      if (!document.getElementById('sourceSKUCol').value) return showError('Vui lòng chọn Cột SKU (Nguồn)');
+      if (!document.getElementById('sourceDataCol').value) return showError('Vui lòng chọn Cột dữ liệu cần copy');
+      return true;
+    }
+
+    function validateStep2() {
+      if (!document.getElementById('targetSheet').value) return showError('Vui lòng chọn Sheet Đích');
+      if (!document.getElementById('targetSKUCol').value) return showError('Vui lòng chọn Cột SKU (Đích)');
+      if (!document.getElementById('targetDataCol').value) return showError('Vui lòng chọn Cột đích để dán dữ liệu');
+      return true;
+    }
+
+    function updateSummary() {
+      document.getElementById('sumSource').innerText = `${config.sourceSheet} | SKU: ${config.sourceSKUCol} | Data: ${config.sourceDataCol}`;
+      document.getElementById('sumTarget').innerText = `${config.targetSheet} | SKU: ${config.targetSKUCol} | Data: ${config.targetDataCol || '--'}`;
+    }
+
+    function executeCopyBySku() {
+      saveConfig();
+      if (!validateStep1() || !validateStep2()) return;
+
+      const btn = document.getElementById('btnUpdate');
+      btn.disabled = true;
+      document.getElementById('progressBox').style.display = 'block';
+      document.getElementById('progressBar').style.width = '40%';
+      document.getElementById('progressText').innerText = 'Đang xử lý...';
+
+      google.script.run
+        .withSuccessHandler(result => {
+          document.getElementById('progressBar').style.width = '100%';
+          if (result.success) {
+            const sec = result.durationMs ? (result.durationMs / 1000).toFixed(2) : '0.00';
+            document.getElementById('progressText').innerText = 'Đã hoàn thành';
+            showStatus(`✓ Hoàn thành! Khớp SKU: ${result.matchCount}, cập nhật mới: ${result.updatedCount || 0}/${result.totalRows} dòng (${sec}s)`, 'success');
+          } else {
+            document.getElementById('progressText').innerText = 'Đã hoàn thành';
+            showStatus('✗ Lỗi: ' + result.error, 'error');
+          }
+          btn.disabled = false;
+        })
+        .withFailureHandler(error => {
+          document.getElementById('progressText').innerText = 'Đã hoàn thành';
+          showStatus('✗ Lỗi hệ thống: ' + error, 'error');
+          btn.disabled = false;
+        })
+        .executeCopyBySkuLookup(config);
+    }
+
+    function showError(msg) {
+      showStatus(msg, 'error');
+      return false;
+    }
+
+    function showStatus(msg, type) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.className = 'status-' + type;
+      statusDiv.innerText = msg;
+    }
+  </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; padding: 15px; font-size: 13px; margin: 0; }
+    .step { display: none; padding: 15px; background: #f9f9f9; border-radius: 4px; margin-bottom: 15px; }
+    .step.active { display: block; }
+    .step-header { font-weight: bold; font-size: 14px; margin-bottom: 12px; color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }
+    select { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 4px; border: 1px solid #ccc; }
+    button { width: 100%; padding: 11px; margin-bottom: 10px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer; font-size: 13px; }
+    .btn-next, .btn-update { background: #1a73e8; color: white; }
+    .btn-next:hover, .btn-update:hover { background: #155cc4; }
+    .btn-back { background: #757575; color: white; margin-top: 10px; }
+    .btn-back:hover { background: #616161; }
+    .btn-update:disabled { background: #ccc; cursor: not-allowed; }
+    .step-indicator { text-align: center; margin-bottom: 15px; font-size: 12px; color: #666; font-weight: bold; }
+    .step-number { display: inline-block; width: 30px; height: 30px; background: #e0e0e0; border-radius: 50%; line-height: 30px; margin: 0 5px; }
+    .step-number.active { background: #1a73e8; color: white; }
+    .step-number.completed { background: #4caf50; color: white; }
+    .help-text { font-size: 12px; color: #666; font-style: italic; margin-top: 8px; line-height: 1.4; }
+    #status { margin-top: 15px; padding: 10px; border-radius: 4px; font-size: 12px; }
+    .status-success { background: #c8e6c9; color: #2e7d32; border-left: 4px solid #2e7d32; }
+    .status-error { background: #ffcdd2; color: #c62828; border-left: 4px solid #c62828; }
+    .progress-bar-bg { width: 100%; background: #eee; height: 8px; border-radius: 4px; overflow: hidden; margin: 15px 0; }
+    .progress-bar-fill { width: 0%; background: #4caf50; height: 100%; transition: 0.3s; }
+  </style>
+</head>
+<body>
+  <div class="step-indicator">
+    <span class="step-number active" id="ind1">1</span>
+    <span class="step-number" id="ind2">2</span>
+  </div>
+
+  <div class="step active" id="step1">
+    <div class="step-header">📋 Bước 1: Chọn Sheet Nguồn</div>
+
+    <label><strong>Sheet Nguồn:</strong></label>
+    <select id="sourceSheet"><option value="">-- Chọn Sheet --</option></select>
+    <div class="help-text">Sheet chứa dữ liệu cần copy.</div>
+
+    <label><strong>Cột SKU (tham chiếu):</strong></label>
+    <select id="sourceSKUCol"><option value="">-- Chọn cột --</option></select>
+
+    <label><strong>Cột dữ liệu cần copy:</strong></label>
+    <select id="sourceDataCol"><option value="">-- Chọn cột --</option></select>
+
+    <button class="btn-next" onclick="goToStep(2)">Tiếp theo →</button>
+  </div>
+
+  <div class="step" id="step2">
+    <div class="step-header">🎯 Bước 2: Chọn Sheet Đích</div>
+
+    <label><strong>Sheet Đích:</strong></label>
+    <select id="targetSheet"><option value="">-- Chọn Sheet --</option></select>
+
+    <label><strong>Cột SKU (tham chiếu):</strong></label>
+    <select id="targetSKUCol"><option value="">-- Chọn cột --</option></select>
+
+    <label><strong>Cột đích để dán dữ liệu:</strong></label>
+    <select id="targetDataCol"><option value="">-- Chọn cột --</option></select>
+
+    <div id="summaryBox" style="background: white; padding: 12px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 15px; font-size: 12px; line-height: 1.6;">
+      <strong>Tóm tắt cấu hình:</strong><br>
+      Nguồn: <span id="sumSource">--</span><br>
+      Đích: <span id="sumTarget">--</span>
+    </div>
+
+    <button class="btn-update" id="btnUpdate" onclick="executeCopyBySku()">✓ COPY DỮ LIỆU</button>
+
+    <div id="progressBox" style="display: none; margin-top: 15px;">
+      <div class="progress-bar-bg"><div id="progressBar" class="progress-bar-fill"></div></div>
+      <p id="progressText" style="text-align: center; font-size: 12px; margin: 10px 0;">Đang xử lý...</p>
+    </div>
+
+    <div id="status"></div>
+
+    <button class="btn-back" onclick="goToStep(1)">← Quay lại</button>
+  </div>
+
+  <script>
+    let config = {
+      sourceSheet: '',
+      sourceSKUCol: '',
+      sourceDataCol: '',
+      targetSheet: '',
+      targetSKUCol: '',
+      targetDataCol: ''
+    };
+
+    window.onload = () => {
+      google.script.run.withSuccessHandler(data => {
+        const sheets = data.sheets;
+        const sourceSelect = document.getElementById('sourceSheet');
+        const targetSelect = document.getElementById('targetSheet');
+        sheets.forEach(name => {
+          sourceSelect.add(new Option(name, name));
+          targetSelect.add(new Option(name, name, name === data.activeSheetName));
+        });
+      }).getSheetAndColumns();
+
+      document.getElementById('sourceSheet').addEventListener('change', loadSourceColumns);
+      document.getElementById('targetSheet').addEventListener('change', loadTargetColumns);
+    };
+
+    function loadSourceColumns() {
+      const sheet = document.getElementById('sourceSheet').value;
+      if (!sheet) return;
+      google.script.run.withSuccessHandler(headers => {
+        const skuCol = document.getElementById('sourceSKUCol');
+        const dataCol = document.getElementById('sourceDataCol');
+        skuCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+        dataCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+        headers.forEach(h => { skuCol.add(new Option(h, h)); dataCol.add(new Option(h, h)); });
+      }).getHeadersBySheetName(sheet);
+    }
+
+    function loadTargetColumns() {
+      const sheet = document.getElementById('targetSheet').value;
+      if (!sheet) return;
+      google.script.run.withSuccessHandler(headers => {
+        const skuCol = document.getElementById('targetSKUCol');
+        const dataCol = document.getElementById('targetDataCol');
+        skuCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+        dataCol.innerHTML = '<option value="">-- Chọn cột --</option>';
+        headers.forEach(h => { skuCol.add(new Option(h, h)); dataCol.add(new Option(h, h)); });
+      }).getHeadersBySheetName(sheet);
+    }
+
+    function goToStep(stepNum) {
+      if (stepNum === 2 && !validateStep1()) return;
+      saveConfig();
+      document.getElementById('step1').classList.toggle('active', stepNum === 1);
+      document.getElementById('step2').classList.toggle('active', stepNum === 2);
+      document.getElementById('ind1').classList.toggle('active', stepNum === 1);
+      document.getElementById('ind2').classList.toggle('active', stepNum === 2);
+      document.getElementById('ind1').classList.toggle('completed', stepNum === 2);
+      if (stepNum === 2) updateSummary();
+    }
+
+    function saveConfig() {
+      config.sourceSheet = document.getElementById('sourceSheet').value;
+      config.sourceSKUCol = document.getElementById('sourceSKUCol').value;
+      config.sourceDataCol = document.getElementById('sourceDataCol').value;
+      config.targetSheet = document.getElementById('targetSheet').value;
+      config.targetSKUCol = document.getElementById('targetSKUCol').value;
+      config.targetDataCol = document.getElementById('targetDataCol').value;
+    }
+
+    function validateStep1() {
+      if (!document.getElementById('sourceSheet').value) return showError('Vui lòng chọn Sheet Nguồn');
+      if (!document.getElementById('sourceSKUCol').value) return showError('Vui lòng chọn Cột SKU (Nguồn)');
+      if (!document.getElementById('sourceDataCol').value) return showError('Vui lòng chọn Cột dữ liệu cần copy');
+      return true;
+    }
+
+    function validateStep2() {
+      if (!document.getElementById('targetSheet').value) return showError('Vui lòng chọn Sheet Đích');
+      if (!document.getElementById('targetSKUCol').value) return showError('Vui lòng chọn Cột SKU (Đích)');
+      if (!document.getElementById('targetDataCol').value) return showError('Vui lòng chọn Cột đích để dán dữ liệu');
+      return true;
+    }
+
+    function updateSummary() {
+      document.getElementById('sumSource').innerText = `${config.sourceSheet} | SKU: ${config.sourceSKUCol} | Data: ${config.sourceDataCol}`;
+      document.getElementById('sumTarget').innerText = `${config.targetSheet} | SKU: ${config.targetSKUCol} | Data: ${config.targetDataCol || '--'}`;
+    }
+
+    function executeCopyBySku() {
+      saveConfig();
+      if (!validateStep1() || !validateStep2()) return;
+
+      const btn = document.getElementById('btnUpdate');
+      btn.disabled = true;
+      document.getElementById('progressBox').style.display = 'block';
+      document.getElementById('progressBar').style.width = '40%';
+      document.getElementById('progressText').innerText = 'Đang xử lý...';
+
+      google.script.run
+        .withSuccessHandler(result => {
+          document.getElementById('progressBar').style.width = '100%';
+          if (result.success) {
+            const sec = result.durationMs ? (result.durationMs / 1000).toFixed(2) : '0.00';
+            document.getElementById('progressText').innerText = 'Đã hoàn thành';
+            showStatus(`✓ Hoàn thành! Khớp SKU: ${result.matchCount}, cập nhật mới: ${result.updatedCount || 0}/${result.totalRows} dòng (${sec}s)`, 'success');
+          } else {
+            document.getElementById('progressText').innerText = 'Đã hoàn thành';
+            showStatus('✗ Lỗi: ' + result.error, 'error');
+          }
+          btn.disabled = false;
+        })
+        .withFailureHandler(error => {
+          document.getElementById('progressText').innerText = 'Đã hoàn thành';
+          showStatus('✗ Lỗi hệ thống: ' + error, 'error');
+          btn.disabled = false;
+        })
+        .executeCopyBySkuLookup(config);
+    }
+
+    function showError(msg) {
+      showStatus(msg, 'error');
+      return false;
+    }
+
+    function showStatus(msg, type) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.className = 'status-' + type;
+      statusDiv.innerText = msg;
+    }
+  </script>
+</body>
+</html>
